@@ -9,17 +9,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Source Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2 # ◄ UPDATED: Node 24 compatible version
 
       # 1. SCA (Software Composition Analysis) - Scan base layers & dependencies
       - name: Run SCA (Trivy Scan)
-        uses: aquasecurity/trivy-action@v0.36.0 # ◄ FIXED: Updated to a valid and secure action version
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: 'fs'
           scan-ref: '.'
           format: 'table'
           severity: 'CRITICAL,HIGH'
-          exit-code: '0' # Set to 1 if you want vulnerabilities to break the build loop
+          exit-code: '0'
 
       # 2. SAST (Static Application Security Testing) - Scan static source code
       - name: Run SAST (Semgrep Scan)
@@ -29,14 +29,14 @@ jobs:
 
       # 3. Docker Build & Push Container Image
       - name: Log in to Docker Hub
-        uses: docker/login-action@v3
+        uses: docker/login-action@v3.3.0 # ◄ UPDATED: Node 24 compatible version
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       # Build and push using the unique GitHub Commit SHA as the image tag
       - name: Build and Push Docker Image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6.13.0 # ◄ UPDATED: Node 24 compatible version
         with:
           context: .
           push: true
@@ -44,7 +44,7 @@ jobs:
 
       # 4. GitOps Manifest Sync (Checkout Manifest Repo using GITOPS_REPO_PAT)
       - name: Checkout GitOps Manifest Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2 # ◄ UPDATED: Node 24 compatible version
         with:
           repository: '${{ github.repository_owner }}/my-gitops-manifests'
           token: '${{ secrets.GITOPS_REPO_PAT }}'
@@ -60,7 +60,7 @@ jobs:
           
           # Configure a generic bot profile to commit the modification
           git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.email "github-actions[bot]@://github.com"
           
           git add kustomization.yaml
           git commit -m "chore: release tag version ${{ github.sha }} [skip ci]"
