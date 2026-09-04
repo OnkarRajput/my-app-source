@@ -1,0 +1,77 @@
+name: Enterprise DevSecOps Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  security-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      # 1. SCA (Software Composition Analysis) - Scan base layers & dependencies
+      - name: Run SCA (Trivy Scan)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0' # Set to 1 if you want vulnerabilities to break the build loop
+
+      # 2. SAST (Static Application Security Testing) - Scan static source code
+      - name: Run SAST (Semgrep Scan)
+        uses: semgrep/semgrep-action@v1
+        with:
+          auditOnInvalidYaml: true
+
+      # 3. Docker Build & Push Container Image
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/devsecops-app:${{ github.sha }}
+
+      # 4. Enterprise GitOps Manifest Update (Kustomize Image Rewrite)
+      - name: Checkout GitOps Manifest Repository
+        uses: actions/checkout@v4
+        with:
+          repository: '${{ github.repository_owner }}/my-gitops-manifests'
+          token: '${{ secrets.GITOPS_REPO_PAT }}'
+          path: 'manifest-repo'
+
+      - name: Update Image Tag via Kustomize
+        run: |
+          cd manifest-repo/environments/dev
+          # Swaps image tags cleanly without using dangerous regex patterns or brittle sed strings
+          kustomize edit set image docker.io/placeholder/devsecops-app=${{ secrets.DOCKERHUB_USERNAME }}/devsecops-app:${{ github.sha }}
+          
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add kustomization.yaml
+          git commit -m "chore: release tag version ${{ github.sha }} [skip ci]"
+          git push
+
+  dast-scan:
+    needs: security-and-build
+    runs-on: self-hosted # Forces this job to execute locally on your laptop via your local runner
+    steps:
+      - name: Wait for ArgoCD Rollout
+        run: sleep 180 # 3-minute hold allowing ArgoCD time to pull and sync changes down to Minikube
+        
+      # 5. DAST (Dynamic Application Security Testing) - Actively scan target endpoints
+      - name: Run DAST (OWASP ZAP Baseline Scan)
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          target: 'http://192.168.64.2:32080' # Pings your application running live inside Minikube
+          fail_action: false
