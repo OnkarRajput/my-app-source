@@ -13,7 +13,7 @@ jobs:
 
       # 1. SCA (Software Composition Analysis) - Scan base layers & dependencies
       - name: Run SCA (Trivy Scan)
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.28.0
         with:
           scan-type: 'fs'
           scan-ref: '.'
@@ -34,6 +34,7 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      # Build and push using the unique GitHub Commit SHA as the image tag
       - name: Build and Push Docker Image
         uses: docker/build-push-action@v5
         with:
@@ -41,7 +42,7 @@ jobs:
           push: true
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/devsecops-app:${{ github.sha }}
 
-      # 4. Enterprise GitOps Manifest Update (Kustomize Image Rewrite)
+      # 4. GitOps Manifest Sync (Checkout Manifest Repo using GITOPS_REPO_PAT)
       - name: Checkout GitOps Manifest Repository
         uses: actions/checkout@v4
         with:
@@ -49,27 +50,35 @@ jobs:
           token: '${{ secrets.GITOPS_REPO_PAT }}'
           path: 'manifest-repo'
 
+      # 5. Kustomize Automated Tag Overwrite
       - name: Update Image Tag via Kustomize
         run: |
           cd manifest-repo/environments/dev
-          # Swaps image tags cleanly without using dangerous regex patterns or brittle sed strings
+          
+          # Swaps image tags cleanly without dangerous regex patterns or brittle sed strings
           kustomize edit set image docker.io/placeholder/devsecops-app=${{ secrets.DOCKERHUB_USERNAME }}/devsecops-app:${{ github.sha }}
           
+          # Configure a generic bot profile to commit the modification
           git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.email "github-actions[bot]@://github.com"
+          
           git add kustomization.yaml
           git commit -m "chore: release tag version ${{ github.sha }} [skip ci]"
           git push
 
   dast-scan:
     needs: security-and-build
-    runs-on: self-hosted # Runs locally on your laptop's runner
+    runs-on: self-hosted # Executes locally on your Mac runner to access your Minikube cluster
     steps:
       - name: Wait for ArgoCD Rollout
-        run: sleep 180 # 3-minute hold allowing ArgoCD time to pull down the tag update
+        run: sleep 180 # 3-minute pause allowing ArgoCD time to poll GitHub and sync to Minikube
 
+      # 6. DAST (Dynamic Application Security Testing) - Run in-cluster to avoid vfkit socket limits
       - name: Trigger In-Cluster DAST Scan
         run: |
+          # Clean up any leftover old job execution from a previous run first
+          kubectl delete job dast-zap-scan --ignore-not-found -n default
+          
           # Apply the DAST scanner task inside your Minikube cluster directly
           kubectl apply -f - <<EOF
           apiVersion: batch/v1
@@ -84,6 +93,15 @@ jobs:
                 containers:
                 - name: zap-scanner
                   image: ghcr.io/zaproxy/zaproxy:stable
+                  # Targets the internal Kubernetes DNS endpoint of your enterprise app service
                   command: ["zap-baseline.py", "-t", "http://cluster.local"]
                 restartPolicy: Never
           EOF
+
+      # 7. Print Vulnerability Report directly into GitHub Actions console logs
+      - name: Fetch and Display DAST Scan Results
+        run: |
+          echo "Waiting for security scan to complete..."
+          sleep 30
+          # Stream the live security reports straight out of the cluster pod
+          kubectl logs job/dast-zap-scan -n default
