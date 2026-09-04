@@ -13,7 +13,7 @@ jobs:
 
       # 1. SCA (Software Composition Analysis) - Scan base layers & dependencies
       - name: Run SCA (Trivy Scan)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0 # ◄ FIXED: Updated to a valid and secure action version
         with:
           scan-type: 'fs'
           scan-ref: '.'
@@ -60,7 +60,7 @@ jobs:
           
           # Configure a generic bot profile to commit the modification
           git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@://github.com"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
           
           git add kustomization.yaml
           git commit -m "chore: release tag version ${{ github.sha }} [skip ci]"
